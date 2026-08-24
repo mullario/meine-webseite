@@ -64,10 +64,18 @@
     background: var(--accent);
     color: white;
   }
+  .photo {
+    width: 100%;
+    max-height: 360px;
+    object-fit: cover;
+    border-radius: 12px;
+    margin-bottom: 24px;
+  }
 </style>
 </head>
 <body>
   <div class="card">
+    <img class="photo" src="hund.jpeg" alt="Schwimmender Hund">
     <h1>Willkommen <span class="accent">👋</span></h1>
     <p>Diese Seite läuft live über GitHub Pages.</p>
     <p>Bearbeite <code>index.html</code> im Repository, um sie auszubauen.</p>
