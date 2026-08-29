@@ -16,6 +16,8 @@ BERLIN = ZoneInfo("Europe/Berlin")
 LAT, LON = 49.44806, 8.23861  # Gönnheim, Landkreis Bad Dürkheim
 UA = "Mozilla/5.0 (compatible; meine-webseite-bot/1.0; +https://github.com/mullario/meine-webseite)"
 ITEMS_PER_FEED = 5
+TARGET_TIMES = [(5, 45), (18, 0)]  # Berliner Ortszeit
+RUN_WINDOW_MINUTES = 20  # Toleranz für Verzögerungen bei GitHub Actions Cron
 
 WEATHER_CODES = {
     0: ("Klarer Himmel", "☀️"),
@@ -241,18 +243,27 @@ def render_page(weather, news_cards_html: str, now: datetime) -> str:
     </div>
 {news_cards_html}
   </div>
-  <footer>Automatisch generiert jeden Morgen um 6 Uhr &middot; <a href="https://github.com/mullario/meine-webseite">Quellcode</a></footer>
+  <footer>Automatisch generiert täglich um 5:45 und 18 Uhr &middot; <a href="https://github.com/mullario/meine-webseite">Quellcode</a></footer>
 </div>
 </body>
 </html>
 """
 
 
+def should_run(now: datetime) -> bool:
+    minutes_now = now.hour * 60 + now.minute
+    for target_h, target_m in TARGET_TIMES:
+        target = target_h * 60 + target_m
+        if 0 <= (minutes_now - target) <= RUN_WINDOW_MINUTES:
+            return True
+    return False
+
+
 def main():
     now = datetime.now(BERLIN)
     force = os.environ.get("FORCE_RUN", "").lower() == "true"
-    if not force and now.hour != 6:
-        print(f"Übersprungen: {now.isoformat()} ist nicht 6 Uhr Berliner Zeit.")
+    if not force and not should_run(now):
+        print(f"Übersprungen: {now.isoformat()} liegt außerhalb der Zielzeiten {TARGET_TIMES}.")
         sys.exit(0)
     weather = get_weather()
     cards = []

@@ -2,11 +2,13 @@ name: Daily Update
 
 on:
   schedule:
-    # 04:00 und 05:00 UTC decken 6:00 Uhr Berlin sowohl in der Sommer- (UTC+2)
-    # als auch in der Winterzeit (UTC+1) ab. build_daily.py prüft die lokale
-    # Berliner Uhrzeit und überspringt den Lauf, der nicht 6 Uhr trifft.
-    - cron: "0 4 * * *"
-    - cron: "0 5 * * *"
+    # Zielzeiten: 5:45 und 18:00 Uhr Berliner Zeit. Je zwei Cron-Einträge
+    # decken Sommer- (UTC+2) und Winterzeit (UTC+1) ab. build_daily.py prüft
+    # die lokale Berliner Uhrzeit und überspringt den Lauf, der nicht passt.
+    - cron: "45 3 * * *"  # 5:45 Berlin (UTC+2, Sommerzeit)
+    - cron: "45 4 * * *"  # 5:45 Berlin (UTC+1, Winterzeit)
+    - cron: "0 16 * * *"  # 18:00 Berlin (UTC+2, Sommerzeit)
+    - cron: "0 17 * * *"  # 18:00 Berlin (UTC+1, Winterzeit)
   workflow_dispatch: {}
 
 permissions:
