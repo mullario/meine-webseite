@@ -1,0 +1,41 @@
+name: Daily Update
+
+on:
+  schedule:
+    # 04:00 und 05:00 UTC decken 6:00 Uhr Berlin sowohl in der Sommer- (UTC+2)
+    # als auch in der Winterzeit (UTC+1) ab. build_daily.py prüft die lokale
+    # Berliner Uhrzeit und überspringt den Lauf, der nicht 6 Uhr trifft.
+    - cron: "0 4 * * *"
+    - cron: "0 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build briefing
+        env:
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: python3 scripts/build_daily.py
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet -- index.html; then
+            echo "Keine Änderungen, nichts zu committen."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Tägliches Update: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
