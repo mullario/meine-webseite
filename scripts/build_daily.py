@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -70,17 +71,19 @@ NEWS_SOURCES = {
         ("Handelsblatt", "https://www.handelsblatt.com/contentexport/feed/schlagzeilen"),
         ("FAZ", "https://www.faz.net/rss/aktuell/wirtschaft/"),
     ],
-    "BVB": [
-        ("Ruhr Nachrichten", "https://www.ruhrnachrichten.de/bvb/feed/"),
-    ],
-    "MotoGP": [
-        ("Motorsport-Magazin.com", "https://www.motorsport-magazin.com/rss/motogp.xml"),
-    ],
     "Künstliche Intelligenz": [
         ("Ars Technica", "https://arstechnica.com/ai/feed/"),
         ("TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/"),
     ],
 }
+
+# Sport: BVB und MotoGP kombiniert, Auswahl nicht nach festem Verhältnis,
+# sondern je Lauf neu nach Aktualität der Meldungen aus beiden Feeds.
+SPORT_FEEDS = [
+    ("Ruhr Nachrichten", "https://www.ruhrnachrichten.de/bvb/feed/"),
+    ("Motorsport-Magazin.com", "https://www.motorsport-magazin.com/rss/motogp.xml"),
+]
+SPORT_ITEMS_PER_FEED = 10  # Pool je Feed, aus dem nach Datum die Top-Meldungen gezogen werden
 
 
 def fetch(url: str, _redirects: int = 0) -> bytes:
@@ -128,7 +131,7 @@ def get_feed_items(url: str, fallback_source: str, limit: int):
         raw = fetch(url)
         root = ET.fromstring(raw)
     except Exception as exc:  # Feed-Ausfall soll den Build nicht stoppen
-        return [{"title": f"({fallback_source} nicht erreichbar: {exc})", "link": "#", "source": ""}]
+        return [{"title": f"({fallback_source} nicht erreichbar: {exc})", "link": "#", "source": "", "pubdate": None}]
 
     items = []
     for item in root.findall("./channel/item")[:limit]:
@@ -140,7 +143,16 @@ def get_feed_items(url: str, fallback_source: str, limit: int):
             title = title[: -len(f" - {source}")]
         elif "news.google.com" in link and " - " in title:
             title, _, source = title.rpartition(" - ")
-        items.append({"title": html.escape(title), "link": html.escape(link), "source": html.escape(source)})
+        try:
+            pubdate = parsedate_to_datetime(item.findtext("pubDate") or "")
+        except (TypeError, ValueError):
+            pubdate = None
+        items.append({
+            "title": html.escape(title),
+            "link": html.escape(link),
+            "source": html.escape(source),
+            "pubdate": pubdate,
+        })
     return items
 
 
@@ -152,6 +164,19 @@ def get_category_headlines(feeds, total: int = TOTAL_PER_CATEGORY):
     for (label, url), limit in zip(feeds, per_feed):
         headlines.extend(get_feed_items(url, label, limit))
     return headlines[:total]
+
+
+def get_ranked_headlines(feeds, total: int, pool_per_feed: int):
+    """Holt aus mehreren Feeds einen größeren Pool und wählt daraus die
+    `total` aktuellsten Meldungen (nach pubDate) über alle Feeds hinweg aus.
+    Meldungen ohne verwertbares Datum landen ans Ende, in Fetch-Reihenfolge."""
+    pool = []
+    for label, url in feeds:
+        pool.extend(get_feed_items(url, label, pool_per_feed))
+    dated = [h for h in pool if h["pubdate"] is not None]
+    undated = [h for h in pool if h["pubdate"] is None]
+    dated.sort(key=lambda h: h["pubdate"], reverse=True)
+    return (dated + undated)[:total]
 
 
 def render_news_card(name: str, headlines) -> str:
@@ -299,9 +324,13 @@ def main():
         sys.exit(0)
     weather = get_weather()
     cards = []
-    for name, feeds in NEWS_SOURCES.items():
-        headlines = get_category_headlines(feeds)
+    for name in ["Deutschland", "Region Bad Dürkheim", "Welt", "Wirtschaft"]:
+        headlines = get_category_headlines(NEWS_SOURCES[name])
         cards.append(render_news_card(name, headlines))
+    sport_headlines = get_ranked_headlines(SPORT_FEEDS, TOTAL_PER_CATEGORY, SPORT_ITEMS_PER_FEED)
+    cards.append(render_news_card("Sport (BVB & MotoGP)", sport_headlines))
+    ki_headlines = get_category_headlines(NEWS_SOURCES["Künstliche Intelligenz"])
+    cards.append(render_news_card("Künstliche Intelligenz", ki_headlines))
     page = render_page(weather, "\n".join(cards), now)
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(page)
