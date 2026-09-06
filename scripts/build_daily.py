@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 BERLIN = ZoneInfo("Europe/Berlin")
 LAT, LON = 49.44806, 8.23861  # Gönnheim, Landkreis Bad Dürkheim
 UA = "Mozilla/5.0 (compatible; meine-webseite-bot/1.0; +https://github.com/mullario/meine-webseite)"
-ITEMS_PER_FEED = 5
 TARGET_TIMES = [(5, 45), (18, 0)]  # Berliner Ortszeit
 RUN_WINDOW_MINUTES = 20  # Toleranz für Verzögerungen bei GitHub Actions Cron
 
@@ -50,15 +49,38 @@ WEATHER_CODES = {
     99: ("Gewitter mit starkem Hagel", "⛈️"),
 }
 
-NEWS_SOURCES = [
-    ("Deutschland", "https://www.tagesschau.de/xml/rss2/"),
-    ("Region Bad Dürkheim", "https://news.google.com/rss/search?q=Bad+D%C3%BCrkheim&hl=de&gl=DE&ceid=DE:de"),
-    ("Welt", "https://www.tagesschau.de/ausland/index~rss2.xml"),
-    ("Wirtschaft", "https://www.tagesschau.de/wirtschaft/index~rss2.xml"),
-    ("BVB", "https://news.google.com/rss/search?q=Borussia+Dortmund&hl=de&gl=DE&ceid=DE:de"),
-    ("MotoGP", "https://news.google.com/rss/search?q=MotoGP&hl=de&gl=DE&ceid=DE:de"),
-    ("Künstliche Intelligenz", "https://rss.golem.de/rss.php?feed=RSS2.0&ms=ki"),
-]
+TOTAL_PER_CATEGORY = 5
+
+# Jede Kategorie: Liste von (Anzeigename der Quelle, Feed-URL).
+# Anzeigename dient nur als Fallback-Badge, wenn der Feed selbst keine
+# <source>-Angabe je Artikel liefert (nur Google News tut das).
+NEWS_SOURCES = {
+    "Deutschland": [
+        ("Tagesschau", "https://www.tagesschau.de/xml/rss2/"),
+        ("Der Spiegel", "https://www.spiegel.de/schlagzeilen/index.rss"),
+    ],
+    "Region Bad Dürkheim": [
+        ("Google News", "https://news.google.com/rss/search?q=Bad+D%C3%BCrkheim&hl=de&gl=DE&ceid=DE:de"),
+    ],
+    "Welt": [
+        ("BBC News", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+        ("The Guardian", "https://www.theguardian.com/world/rss"),
+    ],
+    "Wirtschaft": [
+        ("Handelsblatt", "https://www.handelsblatt.com/contentexport/feed/schlagzeilen"),
+        ("FAZ", "https://www.faz.net/rss/aktuell/wirtschaft/"),
+    ],
+    "BVB": [
+        ("Ruhr Nachrichten", "https://www.ruhrnachrichten.de/bvb/feed/"),
+    ],
+    "MotoGP": [
+        ("Motorsport-Magazin.com", "https://www.motorsport-magazin.com/rss/motogp.xml"),
+    ],
+    "Künstliche Intelligenz": [
+        ("Ars Technica", "https://arstechnica.com/ai/feed/"),
+        ("TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/"),
+    ],
+}
 
 
 def fetch(url: str, _redirects: int = 0) -> bytes:
@@ -101,25 +123,35 @@ def strip_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "").strip()
 
 
-def get_headlines(url: str, limit: int = ITEMS_PER_FEED):
+def get_feed_items(url: str, fallback_source: str, limit: int):
     try:
         raw = fetch(url)
         root = ET.fromstring(raw)
     except Exception as exc:  # Feed-Ausfall soll den Build nicht stoppen
-        return [{"title": f"(Quelle nicht erreichbar: {exc})", "link": "#", "source": ""}]
+        return [{"title": f"({fallback_source} nicht erreichbar: {exc})", "link": "#", "source": ""}]
 
     items = []
     for item in root.findall("./channel/item")[:limit]:
         title = strip_tags(item.findtext("title") or "")
         link = (item.findtext("link") or "#").strip()
         source_el = item.find("source")
-        source = source_el.text.strip() if source_el is not None and source_el.text else ""
+        source = source_el.text.strip() if source_el is not None and source_el.text else fallback_source
         if source and title.endswith(f" - {source}"):
             title = title[: -len(f" - {source}")]
-        elif not source and "news.google.com" in link and " - " in title:
+        elif "news.google.com" in link and " - " in title:
             title, _, source = title.rpartition(" - ")
         items.append({"title": html.escape(title), "link": html.escape(link), "source": html.escape(source)})
     return items
+
+
+def get_category_headlines(feeds, total: int = TOTAL_PER_CATEGORY):
+    """Holt Schlagzeilen aus 1-2 Feeds und mischt sie zu `total` Einträgen."""
+    n = len(feeds)
+    per_feed = [total // n + (1 if i < total % n else 0) for i in range(n)]
+    headlines = []
+    for (label, url), limit in zip(feeds, per_feed):
+        headlines.extend(get_feed_items(url, label, limit))
+    return headlines[:total]
 
 
 def render_news_card(name: str, headlines) -> str:
@@ -267,8 +299,8 @@ def main():
         sys.exit(0)
     weather = get_weather()
     cards = []
-    for name, url in NEWS_SOURCES:
-        headlines = get_headlines(url)
+    for name, feeds in NEWS_SOURCES.items():
+        headlines = get_category_headlines(feeds)
         cards.append(render_news_card(name, headlines))
     page = render_page(weather, "\n".join(cards), now)
     with open("index.html", "w", encoding="utf-8") as f:
