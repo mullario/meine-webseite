@@ -2,13 +2,12 @@ name: Daily Update
 
 on:
   schedule:
-    # Zielzeiten: 5:45 und 18:00 Uhr Berliner Zeit. Je zwei Cron-Einträge
-    # decken Sommer- (UTC+2) und Winterzeit (UTC+1) ab. build_daily.py prüft
-    # die lokale Berliner Uhrzeit und überspringt den Lauf, der nicht passt.
-    - cron: "45 3 * * *"  # 5:45 Berlin (UTC+2, Sommerzeit)
-    - cron: "45 4 * * *"  # 5:45 Berlin (UTC+1, Winterzeit)
-    - cron: "0 16 * * *"  # 18:00 Berlin (UTC+2, Sommerzeit)
-    - cron: "0 17 * * *"  # 18:00 Berlin (UTC+1, Winterzeit)
+    # Läuft alle 15 Minuten. GitHub verzögert geplante Workflows teils um
+    # Stunden, daher kein enges Zeitfenster mehr: build_daily.py prüft anhand
+    # einer im Repo gespeicherten State-Datei (.build-state.json), ob die
+    # Zielzeit (5:45 / 18:00 Berliner Zeit) für heute schon gebaut wurde, und
+    # holt einen verspäteten Lauf beim nächstmöglichen Cron-Tick nach.
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -32,12 +31,12 @@ jobs:
 
       - name: Commit and push if changed
         run: |
-          if git diff --quiet -- index.html; then
+          if git diff --quiet -- index.html .build-state.json; then
             echo "Keine Änderungen, nichts zu committen."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html
+          git add index.html .build-state.json
           git commit -m "Tägliches Update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push

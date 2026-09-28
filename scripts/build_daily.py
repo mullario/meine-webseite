@@ -17,7 +17,7 @@ BERLIN = ZoneInfo("Europe/Berlin")
 LAT, LON = 49.44806, 8.23861  # Gönnheim, Landkreis Bad Dürkheim
 UA = "Mozilla/5.0 (compatible; meine-webseite-bot/1.0; +https://github.com/mullario/meine-webseite)"
 TARGET_TIMES = [(5, 45), (18, 0)]  # Berliner Ortszeit
-RUN_WINDOW_MINUTES = 20  # Toleranz für Verzögerungen bei GitHub Actions Cron
+STATE_FILE = ".build-state.json"
 
 WEATHER_CODES = {
     0: ("Klarer Himmel", "☀️"),
@@ -307,21 +307,52 @@ def render_page(weather, news_cards_html: str, now: datetime) -> str:
 """
 
 
-def should_run(now: datetime) -> bool:
+def target_label(h: int, m: int) -> str:
+    return f"{h:02d}:{m:02d}"
+
+
+def due_target(now: datetime):
+    """Liefert das jüngste Ziel-Zeitfenster (Label), dessen Uhrzeit heute
+    bereits erreicht ist, oder None, wenn noch kein Ziel fällig ist.
+    GitHub Actions Cron kann um Stunden verspätet feuern, deshalb kein
+    enges Zeitfenster: fällig ist alles bis zum aktuellen Zeitpunkt."""
     minutes_now = now.hour * 60 + now.minute
-    for target_h, target_m in TARGET_TIMES:
-        target = target_h * 60 + target_m
-        if 0 <= (minutes_now - target) <= RUN_WINDOW_MINUTES:
-            return True
-    return False
+    due = None
+    for h, m in TARGET_TIMES:
+        if h * 60 + m <= minutes_now:
+            due = target_label(h, m)
+    return due
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state: dict):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def main():
     now = datetime.now(BERLIN)
+    today = now.strftime("%Y-%m-%d")
     force = os.environ.get("FORCE_RUN", "").lower() == "true"
-    if not force and not should_run(now):
-        print(f"Übersprungen: {now.isoformat()} liegt außerhalb der Zielzeiten {TARGET_TIMES}.")
-        sys.exit(0)
+    state = load_state()
+
+    if not force:
+        target = due_target(now)
+        if target is None:
+            print(f"Übersprungen: {now.isoformat()} – heute noch keine Zielzeit {TARGET_TIMES} erreicht.")
+            sys.exit(0)
+        if state.get(target) == today:
+            print(f"Übersprungen: Ziel {target} für {today} wurde bereits gebaut.")
+            sys.exit(0)
+
     weather = get_weather()
     cards = []
     for name in ["Deutschland", "Region Bad Dürkheim", "Welt", "Wirtschaft"]:
@@ -334,6 +365,9 @@ def main():
     page = render_page(weather, "\n".join(cards), now)
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(page)
+    if not force:
+        state[target] = today
+        save_state(state)
     print(f"index.html geschrieben ({now.isoformat()})")
 
 
